@@ -38,7 +38,7 @@ Read the **[step-by-step setup guide](docs/SETUP.md)**. No paid automation servi
 
 The frontend posts a regular HTML form into a hidden iframe. The server replies using `postMessage` addressed to the configured Pages origin, with a random request identifier. This avoids unsupported JSON preflights and opaque `no-cors` responses that cannot prove a submission succeeded. The frontend checks the Google response origin and identifier. There is no public API to retrieve suggestions or tokens.
 
-Admin functions end in `_` and are callable from the teacher's Apps Script editor, not anonymous HTML-service clients. A cryptographic, single-use, time-limited state protects the OAuth callback. Refresh tokens remain in Script Properties. Only configured playlists can receive submissions.
+The editor exposes `setupCrowdSpot`, `showSpotifyAuthorization`, `processQueue` and `disconnectSpotify`. Every visible command requires the active and effective Google account emails to match the private `ADMIN_EMAIL` setting. Anonymous visitors cannot run them. Internal helpers keep their trailing `_` and are inaccessible to HTML-service clients. A cryptographic, single-use, time-limited state protects the OAuth callback. Refresh tokens remain in Script Properties. Only configured playlists can receive submissions.
 
 ## Development
 

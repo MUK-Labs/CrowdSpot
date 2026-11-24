@@ -21,6 +21,7 @@ This installation uses only the teacher's Spotify authorization; students do not
 
 | Property | Value |
 | --- | --- |
+| `ADMIN_EMAIL` | The primary email address of the **Google account** you use to own and run this script (not your Spotify email) |
 | `PUBLIC_ORIGIN` | `https://muk-labs.github.io` (no path, no trailing slash) |
 | `CLASSES_JSON` | Class configuration shown below |
 
@@ -46,20 +47,20 @@ The class key must match the student URL's `class` parameter. The playlist ID is
 5. Add a Script Property named `REDIRECT_URI` containing that exact `/exec` URL.
 
 
-The public web endpoint accepts suggestions and OAuth callbacks only. Administrative functions deliberately have a trailing underscore and must be run from the private Apps Script editor.
+The web endpoint accepts suggestions and OAuth callbacks. In the editor, use the visible commands **without a trailing underscore**. Apps Script hides underscore-suffixed helpers from the Run dropdown. Each visible administrative command checks the caller against `ADMIN_EMAIL`; anonymous visitors and other Google accounts are refused. The automatic timer continues to use the private `processQueue_` helper.
 
 ## 4. Create the Spotify app and connect it
 
 Open the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) with your Premium account. Create an app named **CrowdSpot**, using **Web API** and website `https://muk-labs.github.io/CrowdSpot/`. Use the exact Apps Script `/exec` URL as its **Redirect URI**. Review Spotify's terms yourself. In your private Apps Script **Script Properties**, add `CLIENT_ID` and `CLIENT_SECRET` from the app settings.
 
-1. In the Apps Script editor, select and run `setupCrowdSpot_`. It initializes the private queue spreadsheet and processing trigger. Follow the execution log to the spreadsheet; do not share it with students.
-2. Run `showSpotifyAuthorization_`. Open the authorization URL from the execution log promptly; the link is short-lived and one-use.
+1. In the Apps Script editor, select **Code.gs**, save, and choose `setupCrowdSpot` in the function dropdown beside **Run / Debug**. Click **Run**. Review the Google authorization prompt, including access to your Google account email used to verify administrative access. It initializes the private queue spreadsheet and processing trigger. Follow the execution log to the spreadsheet; do not share it with students.
+2. Run `showSpotifyAuthorization`. Open the authorization URL from the execution log promptly; the link is short-lived and one-use.
 3. Sign in to the intended Spotify account and approve playlist access. Spotify redirects back to Apps Script with a confirmation.
-4. Return to Apps Script if you need to inspect execution status. `processQueue_` can be run manually to process pending entries; the timer also runs it automatically.
+4. Return to Apps Script if you need to inspect execution status. `processQueue` can be run manually to process pending entries; the timer also runs it automatically.
 
 Optional Script Properties `MAX_DAILY_SUBMISSIONS` (default 500 across classes, UTC day) and `MAX_QUEUE_ROWS` (default 10,000) cap intake. `SHEET_ID` is created automatically by setup.
 
-Keep authorization URLs private. If a link expires or is already used, run `showSpotifyAuthorization_` again. Spotify authorization currently needs renewing after six months; run the same function to reconnect. Pending submissions remain in the sheet while authorization is unavailable.
+Keep authorization URLs private. If a link expires or is already used, run `showSpotifyAuthorization` again. Spotify authorization currently needs renewing after six months; run the same function to reconnect. Pending submissions remain in the sheet while authorization is unavailable.
 
 ## 5. Connect the public site
 
@@ -108,23 +109,36 @@ Set `open` to `false` to stop accepting new suggestions. Before revealing a play
 
 ## Updating and troubleshooting
 
+### Upgrading from the original version (dropdown shows only doGet and doPost)
+
+1. Replace **both** `Code.gs` and `appsscript.json` with the current versions linked above. Existing Script Properties, queue data and Spotify tokens are preserved.
+2. Add `ADMIN_EMAIL` in **Project Settings → Script Properties**, using the Google account email shown for your Apps Script account.
+3. Save and return to **Code.gs**. If needed, reload the editor. The dropdown now offers `setupCrowdSpot`, `showSpotifyAuthorization`, `processQueue` and `disconnectSpotify`—without trailing underscores.
+4. Run `setupCrowdSpot` and review the additional Google email permission. Run `showSpotifyAuthorization` next if you have not connected Spotify.
+5. Update the existing web-app deployment to **New version**, keeping its `/exec` URL. Do not delete your Script Properties, queue sheet or existing timer. Setup does not create a second timer when one already exists.
+
+Do not simply strip the underscores from internal helpers: that would expose administrative operations without an identity check.
+
 | Situation | Action |
 | --- | --- |
+| Dropdown shows only `doGet` and `doPost` | Follow the upgrade steps above; the original version hid the admin commands. |
+| Administrator identity unavailable | Update the manifest too, save, and authorize the email scope from the editor. |
+| Administrator access required | Use the Google account whose primary email is stored in `ADMIN_EMAIL`. |
 | The site says it is not connected | Set the deployed `/exec` URL in `config.js` and wait for Pages to deploy. |
 | Submission times out | Check deployment access is **Anyone**, execution is **Me**, and `PUBLIC_ORIGIN` is exactly the page origin. Inspect Apps Script executions and the private queue before retrying. |
 | Google login or access-denied screen | Anonymous access is missing or blocked by Workspace policy. |
-| Spotify needs reconnecting | Run `showSpotifyAuthorization_`, authorize the same account, then run `processQueue_`. |
+| Spotify needs reconnecting | Run `showSpotifyAuthorization`, authorize the same account, then run `processQueue`. |
 | Spotify rejects the destination | Verify the playlist ID, ownership, privacy and collaboration settings. |
 | A track will not transfer | Inspect its private queue status/error; invalid or unavailable tracks can fail even when the link has the correct format. |
 | Spotify rate limit or temporary error | The queue defers/retries work; do not repeatedly rerun it. |
 | You updated `Code.gs` | Use **Deploy → Manage deployments → Edit → New version → Deploy**. Keep the existing deployment URL. Saving code alone does not update the deployed web app. |
 | You created an entirely new deployment | Update `REDIRECT_URI`, Spotify's redirect allowlist, and `config.js`, then reconnect Spotify. |
 
-Use `disconnectSpotify_` to remove the stored Spotify authorization. This preserves the queue. To stop the installation completely, close all classes, remove its `processQueue_` timer in Apps Script's **Triggers** page, and archive the web-app deployment. You can also revoke CrowdSpot in your Spotify account's connected-app settings.
+Use `disconnectSpotify` to remove the stored Spotify authorization. This preserves the queue. To stop the installation completely, close all classes, remove its `processQueue_` timer in Apps Script's **Triggers** page, and archive the web-app deployment. You can also revoke CrowdSpot in your Spotify account's connected-app settings.
 
 ## Data retention and limitations
 
-The private spreadsheet contains track/class IDs, timestamps, status and processing information. **Pause the processing trigger and wait for active executions to finish before sorting, deleting or editing queue rows**; the worker updates rows by their position. Use filter views for ordinary inspection. Delete finished class rows after you no longer need them; retain the header row. Avoid editing/deleting pending entries unless you intend to cancel or repair them. Resume the timer by running `setupCrowdSpot_` after maintenance. To retry a repaired `paused` or `failed` entry, set its `status` to `pending` and clear `retry_after` while processing is stopped. Never publish the sheet. Hosting providers maintain their own logs; CrowdSpot's app does not collect names, emails or student IP addresses.
+The private spreadsheet contains track/class IDs, timestamps, status and processing information. **Pause the processing trigger and wait for active executions to finish before sorting, deleting or editing queue rows**; the worker updates rows by their position. Use filter views for ordinary inspection. Delete finished class rows after you no longer need them; retain the header row. Avoid editing/deleting pending entries unless you intend to cancel or repair them. Resume the timer by running `setupCrowdSpot` after maintenance. To retry a repaired `paused` or `failed` entry, set its `status` to `pending` and clear `retry_after` while processing is stopped. Never publish the sheet. Hosting providers maintain their own logs; CrowdSpot's app does not collect names, emails or student IP addresses.
 
 This is a small classroom service using Google Apps Script quotas. It is not designed for high-volume public campaigns. Track links are accepted; album/playlist links, shortened links, local files and uploads are not supported. Students can use Spotify's full `open.spotify.com/track/...` link or `spotify:track:...` URI.
 

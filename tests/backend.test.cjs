@@ -9,6 +9,8 @@ const source = fs.readFileSync(path.join(__dirname, '../backend/Code.gs'), 'utf8
 const TRACK = '4iV5W9uYEdYUVa79Axb7Rh';
 const PLAYLIST = '3cEYpjA9oz9GiPac4AsH4n';
 const OTHER = '1301WleyT98MSxVHPZCA6M';
+const ADMIN_EMAIL = 'teacher@example.com';
+const ADMIN_COMMANDS = ['setupCrowdSpot', 'showSpotifyAuthorization', 'processQueue', 'disconnectSpotify'];
 const HEADERS = ['received_at', 'class_id', 'playlist_id', 'track_id', 'status', 'attempts', 'retry_after', 'detail'];
 
 function fixture(overrides = {}) {
@@ -16,6 +18,7 @@ function fixture(overrides = {}) {
     PUBLIC_ORIGIN: 'https://muk-labs.github.io',
     CLASSES_JSON: JSON.stringify({seminar: {playlistId: PLAYLIST, open: true}}),
     SHEET_ID: 'private-sheet', CLIENT_ID: 'fake-client', CLIENT_SECRET: 'fake-secret',
+    ADMIN_EMAIL,
     REDIRECT_URI: 'https://script.google.com/macros/s/deployment-test/exec', ...overrides
   };
   const store = {
@@ -35,11 +38,18 @@ function fixture(overrides = {}) {
     appendRow: row => rows.push(Array.from(row)), setName() {}, setFrozenRows() {}
   };
   const logs = [], requests = [], triggers = [];
+  // Real Apps Script web apps may execute as the owner even when the visitor
+  // is anonymous. Keep active and effective identities independently mutable.
+  const identities = {active: ADMIN_EMAIL, effective: ADMIN_EMAIL, throwActive: false, throwEffective: false};
   let responder = () => {throw new Error('Unexpected network request');};
   let locked = false;
   const context = vm.createContext({
     console: {log: msg => logs.push(String(msg))},
     PropertiesService: {getScriptProperties: () => store},
+    Session: {
+      getActiveUser: () => ({getEmail() {if (identities.throwActive) throw new Error('Identity unavailable'); return identities.active;}}),
+      getEffectiveUser: () => ({getEmail() {if (identities.throwEffective) throw new Error('Identity unavailable'); return identities.effective;}})
+    },
     LockService: {getScriptLock: () => ({tryLock: () => {assert.equal(locked, false, 'Nested lock'); locked = true; return true;}, releaseLock: () => {locked = false;}})},
     SpreadsheetApp: {openById: id => {assert.equal(id, 'private-sheet'); return {getSheetByName: name => name === 'Queue' ? sheet : null};}, flush() {}, create: () => ({getSheets: () => [sheet], getId: () => 'private-sheet', getUrl: () => 'https://docs.google.com/private-sheet'})},
     HtmlService: {XFrameOptionsMode: {ALLOWALL: 'ALLOWALL'}, createHtmlOutput: html => ({html, setXFrameOptionsMode(mode) {this.frameMode = mode; return this;}})},
@@ -48,7 +58,7 @@ function fixture(overrides = {}) {
     UrlFetchApp: {fetch(url, options) {requests.push({url, options}); return responder(url, options);}}
   });
   vm.runInContext(source, context, {filename: 'Code.gs'});
-  return {context, properties, rows, requests, logs, triggers, respond: fn => {responder = fn;}};
+  return {context, properties, rows, requests, logs, triggers, identities, respond: fn => {responder = fn;}};
 }
 function http(status, body, headers = {}) {
   return {getResponseCode: () => status, getContentText: () => JSON.stringify(body), getAllHeaders: () => headers};
@@ -118,9 +128,81 @@ test('setup creates exactly one processing trigger across repeat runs', () => {
   const f = fixture(); f.context.setupCrowdSpot_(); f.context.setupCrowdSpot_();
   assert.equal(f.triggers.length, 1); assert.equal(f.triggers[0].getHandlerFunction(), 'processQueue_');
 });
-test('all administrative and helper functions are inaccessible to google.script.run', () => {
+test('public server functions are limited to entry points and guarded editor commands', () => {
   const publicNames = Array.from(source.matchAll(/^function\s+([\w]+)\(/gm)).map(x => x[1]).filter(x => !x.endsWith('_'));
-  assert.deepEqual(publicNames.sort(), ['doGet', 'doPost']);
+  assert.deepEqual(publicNames.sort(), ['doGet', 'doPost', ...ADMIN_COMMANDS].sort());
+});
+test('every editor command requires explicit ADMIN_EMAIL before any helper effect', () => {
+  for (const command of ADMIN_COMMANDS) {
+    for (const email of [undefined, '', '   ']) {
+      const f = fixture({ADMIN_EMAIL: email}); const effects = [];
+      for (const name of ADMIN_COMMANDS) f.context[name + '_'] = () => {effects.push(name);};
+      const before = JSON.stringify(f.properties);
+      assert.throws(() => f.context[command](), /Set ADMIN_EMAIL/, command);
+      assert.deepEqual(effects, []); assert.equal(JSON.stringify(f.properties), before);
+      assert.equal(f.requests.length, 0); assert.equal(f.triggers.length, 0); assert.equal(f.rows.length, 1);
+    }
+  }
+});
+test('every editor command rejects anonymous and mismatched identities, even when effective user is owner', () => {
+  const cases = [
+    {name: 'anonymous visitor executing as owner', active: '', effective: ADMIN_EMAIL},
+    {name: 'missing active email', active: undefined, effective: ADMIN_EMAIL},
+    {name: 'unrelated same-domain visitor', active: 'student@example.com', effective: ADMIN_EMAIL},
+    {name: 'different active and effective account', active: 'other@example.com', effective: 'other@example.com'},
+    {name: 'owner active but wrong effective account', active: ADMIN_EMAIL, effective: 'other@example.com'},
+    {name: 'owner active but missing effective identity', active: ADMIN_EMAIL, effective: ''},
+    {name: 'both anonymous', active: '', effective: ''}
+  ];
+  for (const command of ADMIN_COMMANDS) {
+    for (const identities of cases) {
+      const f = fixture(); Object.assign(f.identities, identities); const effects = [];
+      for (const name of ADMIN_COMMANDS) f.context[name + '_'] = () => {effects.push(name);};
+      const before = JSON.stringify(f.properties);
+      assert.throws(() => f.context[command](), /Administrator access required/, `${command}: ${identities.name}`);
+      assert.deepEqual(effects, []); assert.equal(JSON.stringify(f.properties), before);
+      assert.equal(f.requests.length, 0); assert.equal(f.triggers.length, 0); assert.equal(f.rows.length, 1);
+    }
+  }
+});
+test('every editor command fails closed when Google identity lookup is missing or throws', () => {
+  for (const command of ADMIN_COMMANDS) {
+    for (const failure of ['activeThrows', 'effectiveThrows', 'missingSession', 'missingActiveUser', 'missingEffectiveUser']) {
+      const f = fixture(); const effects = [];
+      for (const name of ADMIN_COMMANDS) f.context[name + '_'] = () => {effects.push(name);};
+      if (failure === 'activeThrows') f.identities.throwActive = true;
+      if (failure === 'effectiveThrows') f.identities.throwEffective = true;
+      if (failure === 'missingSession') delete f.context.Session;
+      if (failure === 'missingActiveUser') f.context.Session.getActiveUser = () => null;
+      if (failure === 'missingEffectiveUser') f.context.Session.getEffectiveUser = () => null;
+      const before = JSON.stringify(f.properties);
+      assert.throws(() => f.context[command](), /Administrator identity unavailable/, `${command}: ${failure}`);
+      assert.deepEqual(effects, []); assert.equal(JSON.stringify(f.properties), before);
+      assert.equal(f.requests.length, 0); assert.equal(f.triggers.length, 0); assert.equal(f.rows.length, 1);
+    }
+  }
+});
+test('configured teacher can dispatch every editor command to exactly its private helper', () => {
+  for (const command of ADMIN_COMMANDS) {
+    const f = fixture({ADMIN_EMAIL: ' Teacher@Example.COM '});
+    Object.assign(f.identities, {active: 'TEACHER@example.com', effective: ' teacher@example.COM '});
+    const effects = [];
+    for (const name of ADMIN_COMMANDS) f.context[name + '_'] = (...args) => {effects.push({name, args}); return `result:${name}`;};
+    assert.equal(f.context[command]({untrusted: 'not passed through'}), `result:${command}`);
+    assert.deepEqual(effects, [{name: command, args: []}]);
+  }
+});
+test('caller parameters cannot impersonate the administrator or supply identity', () => {
+  for (const command of ADMIN_COMMANDS) {
+    const f = fixture(); f.identities.active = ''; const effects = [];
+    for (const name of ADMIN_COMMANDS) f.context[name + '_'] = () => {effects.push(name);};
+    assert.throws(() => f.context[command]({ADMIN_EMAIL, email: ADMIN_EMAIL, active: ADMIN_EMAIL, effective: ADMIN_EMAIL, parameter: {email: ADMIN_EMAIL}}, ADMIN_EMAIL), /Administrator access required/);
+    assert.deepEqual(effects, []);
+  }
+});
+test('manifest requests the Google email scope needed for trusted administrator identity', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../backend/appsscript.json'), 'utf8'));
+  assert.ok(manifest.oauthScopes.includes('https://www.googleapis.com/auth/userinfo.email'));
 });
 test('OAuth state is single-use and expires; invalid state cannot clear valid state', () => {
   const f = fixture(); f.context.showSpotifyAuthorization_(); const state = JSON.parse(f.properties.OAUTH_STATE);

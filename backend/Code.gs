@@ -1,11 +1,33 @@
 /** CrowdSpot — deploy as a web app, execute as yourself, access: Anyone.
- * Only doGet and doPost are public. Trailing-underscore functions are deliberately
- * inaccessible through google.script.run, including all teacher operations.
+ * doGet/doPost serve visitors. Visible editor commands require the configured
+ * teacher's Google identity; trailing-underscore helpers remain private.
  * Keep credentials in Script Properties, never in GitHub or the student page.
  */
 const CS_HEADERS_ = ['received_at', 'class_id', 'playlist_id', 'track_id', 'status', 'attempts', 'retry_after', 'detail'];
 const CS_ACCEPTED_ = 'Your suggestion has been received. It will be added automatically shortly.';
 const CS_SCOPES_ = 'playlist-modify-private playlist-read-private user-read-private';
+
+// Apps Script hides names ending in '_' from its Run dropdown. These visible
+// commands are also discoverable by HTML-service clients, so every command must
+// authorize the ACTIVE caller, not just the effective (web-app owner's) account.
+function setupCrowdSpot() { requireAdmin_(); return setupCrowdSpot_(); }
+function showSpotifyAuthorization() { requireAdmin_(); return showSpotifyAuthorization_(); }
+function processQueue() { requireAdmin_(); return processQueue_(); }
+function disconnectSpotify() { requireAdmin_(); return disconnectSpotify_(); }
+function requireAdmin_() {
+  const expected = String(props_().getProperty('ADMIN_EMAIL') || '').trim().toLowerCase();
+  if (!expected) throw new Error('Set ADMIN_EMAIL in Script Properties to the Google account email you use in this editor.');
+  let active = '', effective = '';
+  try {
+    active = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+    effective = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+  } catch (error) {
+    throw new Error('Administrator identity unavailable. Use the updated appsscript.json and authorize this script from the editor.');
+  }
+  if (!active || active !== expected || effective !== expected) {
+    throw new Error('Administrator access required. Run this command in Apps Script using the Google account configured in ADMIN_EMAIL.');
+  }
+}
 
 function props_() { return PropertiesService.getScriptProperties(); }
 function config_() {
@@ -37,7 +59,7 @@ function parseTrack_(input) {
   return m ? m[1] : null;
 }
 function queueSheet_(cfg) {
-  if (!cfg.sheetId) throw new Error('Run setupCrowdSpot_ first.');
+  if (!cfg.sheetId) throw new Error('Run setupCrowdSpot first.');
   const sheet = SpreadsheetApp.openById(cfg.sheetId).getSheetByName('Queue');
   if (!sheet) throw new Error('Queue sheet is missing.');
   return sheet;
@@ -108,7 +130,7 @@ function setupCrowdSpot_() {
     const exists = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'processQueue_'; });
     if (!exists) ScriptApp.newTrigger('processQueue_').timeBased().everyMinutes(1).create();
   });
-  console.log('Queue ready. Authorize Spotify with showSpotifyAuthorization_. Keep the sheet and script private.');
+  console.log('Queue ready. Authorize Spotify with showSpotifyAuthorization. Keep the sheet and script private.');
 }
 function showSpotifyAuthorization_() {
   const p = props_().getProperties();
@@ -148,7 +170,7 @@ function doGet(e) {
     return HtmlService.createHtmlOutput('<h1>Spotify connected</h1><p>CrowdSpot can now process queued suggestions. You may close this tab.</p>');
   } catch (error) {
     // Do not reflect Spotify's token response or incoming callback parameters.
-    return HtmlService.createHtmlOutput('<h1>Connection not completed</h1><p>Run showSpotifyAuthorization_ in your Apps Script editor for a fresh link, then try again. Existing queued suggestions are safe.</p>');
+    return HtmlService.createHtmlOutput('<h1>Connection not completed</h1><p>Run showSpotifyAuthorization in your Apps Script editor for a fresh link, then try again. Existing queued suggestions are safe.</p>');
   }
 }
 function disconnectSpotify_() {
@@ -182,7 +204,7 @@ function accessToken_(force) {
       const current = JSON.parse(props_().getProperty('SPOTIFY_TOKEN') || 'null');
       if (current && current.refresh_token === stored.refresh_token) {
         props_().deleteProperty('SPOTIFY_TOKEN');
-        props_().setProperty('AUTH_REQUIRED', 'Spotify authorization expired or was revoked. Run showSpotifyAuthorization_.');
+        props_().setProperty('AUTH_REQUIRED', 'Spotify authorization expired or was revoked. Run showSpotifyAuthorization.');
       }
     });
     throw error;

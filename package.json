@@ -1,0 +1,12 @@
+{
+  "name": "crowdspot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Anonymous classroom track suggestions for Spotify",
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "check": "node --check app.js && node --check config.js && npm test",
+    "serve": "python3 -m http.server 8080"
+  },
+  "engines": { "node": ">=22" }
+}

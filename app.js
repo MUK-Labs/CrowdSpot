@@ -8,7 +8,10 @@
   const buttonLabel = document.getElementById('button-label');
   const status = document.getElementById('submission-status');
   const params = new URLSearchParams(window.location.search);
-  const classId = params.get('class') || config.defaultClass || 'seminar';
+  // The general website must never select a teacher's playlist implicitly.
+  // Reject ambiguous links too; only one explicit class parameter is accepted.
+  const classParams = params.getAll('class');
+  const classId = classParams.length === 1 && /^[A-Za-z0-9_-]{1,64}$/.test(classParams[0]) ? classParams[0] : '';
   let pending = null;
   let ready = false;
 
@@ -133,9 +136,12 @@
     document.getElementById('headline').textContent = config.title.trim();
     document.title = `${config.title.trim()} — CrowdSpot`;
   }
-  ready = validEndpoint(config.endpoint) && /^[A-Za-z0-9_-]{1,64}$/.test(classId);
+  ready = validEndpoint(config.endpoint) && Boolean(classId);
   button.disabled = !ready;
-  if (!config.endpoint) {
+  input.disabled = !ready;
+  if (!classId) {
+    setStatus('Open the class link shared by your teacher to submit a track. No class is selected on this page.');
+  } else if (!config.endpoint) {
     setStatus('Submissions aren’t open yet. Your teacher is connecting this listening space.');
   } else if (!ready) {
     setStatus('This submission link isn’t ready. Please ask your teacher for the current link.', 'error');

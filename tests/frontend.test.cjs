@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const validTrack = 'https://open.spotify.com/track/4iV5W9uYEdYUVa79Axb7Rh';
 const endpoint = 'https://script.google.com/macros/s/DEPLOYMENT_ID/exec';
 
-function browser(config = { endpoint, defaultClass: 'seminar' }, query = '') {
+function browser(config = { endpoint }, query = '?class=seminar') {
   const elements = new Map();
   const messages = {};
   let nativeSubmissions = 0;
@@ -94,12 +94,40 @@ test('non-track and deceptive URLs never leave the browser', () => {
   }
 });
 
-test('only the selected class code is submitted; malformed class codes disable submission', () => {
-  const page = browser(undefined, '?class=analysis-01');
-  assert.equal(page.get('class-id').value, 'analysis-01');
-  const invalid = browser(undefined, '?class=../../secret');
-  invalid.submit();
-  assert.equal(invalid.count(), 0);
+test('an explicit valid class code selects the destination and allows submission', () => {
+  for (const id of ['seminar', 'analysis-01', 'a_B2']) {
+    const page = browser(undefined, `?class=${id}`);
+    assert.equal(page.get('class-id').value, id);
+    assert.equal(page.get('submit-button').disabled, false);
+    assert.equal(page.get('track').disabled, false);
+    page.submit();
+    assert.equal(page.count(), 1);
+  }
+});
+
+test('bare, missing, empty, or ambiguous class links never fall back to a legacy default', () => {
+  for (const query of ['', '?utm=x', '?class=', '?class=%20', '?class=+', '?class=seminar&class=analysis-01', '?class=seminar&class=seminar']) {
+    for (const config of [{ endpoint }, { endpoint, defaultClass: 'seminar' }]) {
+      const page = browser(config, query);
+      page.submit();
+      assert.equal(page.count(), 0, query);
+      assert.equal(page.get('submit-button').disabled, true, query);
+      assert.equal(page.get('track').disabled, true, query);
+      assert.equal(page.get('class-id').value, '', query);
+      assert.match(page.get('submission-status').textContent, /teacher/i);
+    }
+  }
+});
+
+test('malformed explicit class codes disable submission rather than using the configured default', () => {
+  for (const query of ['?class=../../secret', '?class=%20seminar', '?class=seminar%20', `?class=${'a'.repeat(65)}`]) {
+    const page = browser({ endpoint, defaultClass: 'seminar' }, query);
+    page.submit();
+    assert.equal(page.count(), 0, query);
+    assert.equal(page.get('submit-button').disabled, true, query);
+    assert.equal(page.get('track').disabled, true, query);
+    assert.equal(page.get('class-id').value, '', query);
+  }
 });
 
 test('in-flight requests disable repeats and messages require both trusted origin and nonce', () => {

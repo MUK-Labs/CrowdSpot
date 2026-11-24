@@ -69,12 +69,11 @@ Edit [`config.js`](../config.js) in this repository:
 ```js
 window.CROWDSPOT_CONFIG = {
   endpoint: 'https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec',
-  defaultClass: 'seminar',
   title: 'A track worth sharing.'
 };
 ```
 
-Only the deployment URL and presentation defaults belong here. **No Client secret, token or playlist ID.** Commit the change to `main`; GitHub Pages will update the site.
+Only the deployment URL and presentation settings belong here. **No Client secret, token or playlist ID.** Commit the change to `main`; GitHub Pages will update the site. Do not add a default class: the bare website intentionally has no selected class and cannot accept submissions. Share an explicit `?class=seminar` link (or the key of another configured class).
 
 Pages is already configured to publish from **main / root**. If configuring a fork, use **Settings → Pages → Deploy from a branch → main → / (root)**.
 
@@ -89,6 +88,7 @@ Use a real track you are happy to add to a test playlist:
 5. Check an invalid link and an unknown class. They must not add anything to Spotify.
 6. Set the class's `open` to `false` and confirm submissions are refused; restore it to `true` when ready.
 7. Confirm students cannot see the spreadsheet, playlist contents, or Spotify credentials.
+8. Open `https://muk-labs.github.io/CrowdSpot/` without a class parameter. Both the input and submit button should be disabled, with a message asking for the teacher's class link. Empty or repeated class parameters must not select a playlist either.
 
 Automated tests mock the external services. They do not replace this deployment check, especially the anonymous iframe acknowledgment through Google. If a network timeout appears, receipt is uncertain; the student can retry, and deduplication protects the playlist.
 

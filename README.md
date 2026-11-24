@@ -20,6 +20,7 @@ No student login, names, email addresses, playlist browsing, or public contribut
 
 - Use your own Spotify Premium account and a private, non-collaborative playlist.
 - Share a separate class link such as `https://muk-labs.github.io/CrowdSpot/?class=seminar`.
+- The general website selects no class and cannot submit tracks. A valid, explicit `?class=...` link is required; there is no default playlist.
 - Keep class-to-playlist mappings and all Spotify credentials in Apps Script, outside GitHub.
 - Review a private queue spreadsheet for transfer status and failures.
 - Close a class's submissions, reconnect Spotify, or process queued entries from the private Apps Script editor.
